@@ -40,14 +40,26 @@ class OrchestratorService(
         deviceService.start(context)
         gatewaySvc.start(context)
 
+        // An unavailable local foreground service must not prevent an
+        // independent ping service from starting. Preserve the actual cause
+        // so an operator can distinguish Android FGS restrictions from other
+        // startup failures.
         try {
             localServerSvc.start(context)
+        } catch (e: Exception) {
+            logsSvc.insert(
+                LogEntry.Priority.ERROR,
+                MODULE_NAME,
+                "Local Server failed to start: ${e.javaClass.simpleName}: ${e.message}"
+            )
+        }
+        try {
             pingSvc.start(context)
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             logsSvc.insert(
                 LogEntry.Priority.WARN,
                 MODULE_NAME,
-                "Can't start foreground services while the app is running in the background"
+                "Ping service failed to start: ${e.javaClass.simpleName}: ${e.message}"
             )
         }
 
