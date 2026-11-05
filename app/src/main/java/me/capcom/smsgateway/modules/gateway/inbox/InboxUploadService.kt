@@ -36,6 +36,12 @@ class InboxUploadService : KoinComponent {
         simNumber: Int?,
         date: Date,
     ) {
+        // Header-only MMS events have no content and are never uploaded,
+        // regardless of the passphrase — skip silently as before.
+        if (message is InboxMessage.MmsHeaders) {
+            return
+        }
+
         // The server only accepts encrypted inbox messages, and encryption
         // requires a passphrase. Skip with an actionable message instead of
         // failing inside the encryption provider.
