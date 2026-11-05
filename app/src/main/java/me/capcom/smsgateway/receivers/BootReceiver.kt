@@ -23,7 +23,6 @@ class BootReceiver : BroadcastReceiver(), KoinComponent {
             Intent.ACTION_REBOOT,
             "android.intent.action.QUICKBOOT_POWERON",
             "com.htc.intent.action.QUICKBOOT_POWERON",
-            Intent.ACTION_SHUTDOWN,
         )
     }
 }
