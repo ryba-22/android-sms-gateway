@@ -2,6 +2,8 @@
 
 Date: 2026-11-05. Fork: `ryba-22/android-sms-gateway`. Upstream: `capcom6/android-sms-gateway`.
 
+**Execution plan (2026-11-09):** [IMPLEMENTATION_PLAN_2026-11-09.md](IMPLEMENTATION_PLAN_2026-11-09.md) — small PRs, invariants, tests, risks and acceptance gates.
+
 ## Reality / intent
 
 Monthly batches of approximately 1,100 SMS can run over multiple days. Ad hoc messages (roughly 10–50) need to be queued quickly during the week. External clients (Excel, CRD, n8n and a compact operator UI) should submit over one API. The Android phone uses its SIM to send. Full independence from SMS8 and control over *when no message may be sent* matter more than throughput.
