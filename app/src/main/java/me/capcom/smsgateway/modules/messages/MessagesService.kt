@@ -31,6 +31,7 @@ import me.capcom.smsgateway.modules.health.domain.CheckResult
 import me.capcom.smsgateway.modules.health.domain.Status
 import me.capcom.smsgateway.modules.logs.LogsService
 import me.capcom.smsgateway.modules.logs.db.LogEntry
+import me.capcom.smsgateway.modules.messages.attempts.MessageAttemptsDao
 import me.capcom.smsgateway.modules.messages.data.MessageSort
 import me.capcom.smsgateway.modules.messages.data.SendParams
 import me.capcom.smsgateway.modules.messages.data.SendRequest
@@ -55,6 +56,7 @@ class MessagesService(
     private val logsService: LogsService,
     private val mmsSender: MmsSender,
     private val hardSendingPolicy: SendingPolicyGate,
+    private val attempts: MessageAttemptsDao,
 ) {
     /**
      * Serializes the worker (KEEP/REPLACE) decisions made from the DB snapshot
@@ -266,8 +268,33 @@ class MessagesService(
             else -> return
         }
 
-        val (id, phone) = intent.dataString?.split("|", limit = 2) ?: return
+        val attemptId = intent.getStringExtra(EXTRA_ATTEMPT_ID)
+        if (attemptId != null) {
+            val attempt = attempts.byAttemptId(attemptId) ?: return
+            val partIndex = intent.getIntExtra(EXTRA_PART_INDEX, -1)
+            if (partIndex < 0) return
+            val outcome = when (intent.action) {
+                EventsReceiver.ACTION_SENT ->
+                    attempts.recordSendCallback(attemptId, partIndex, state == ProcessingState.Sent)
+                EventsReceiver.ACTION_DELIVERED ->
+                    attempts.recordDeliveryCallback(attemptId, partIndex, state == ProcessingState.Delivered)
+                else -> null
+            }
+            // No callback for an individual multipart segment may prematurely mark
+            // the entire logical SMS SENT/DELIVERED.
+            val target = when (outcome) {
+                "SENT" -> ProcessingState.Sent
+                "DELIVERED" -> ProcessingState.Delivered
+                "FAILED" -> ProcessingState.Failed
+                else -> return
+            }
+            machine.transitionRecipient(attempt.messageId, attempt.phoneNumber, target, error)
+            return
+        }
 
+        val (id, phone) = intent.dataString?.split("|", limit = 2) ?: return
+        // Ignore legacy callbacks for a message now owned by the attempt ledger.
+        if (attempts.existing(id, phone) != null) return
         machine.transitionRecipient(id, phone, state, error)
     }
 
@@ -403,10 +430,26 @@ class MessagesService(
 
         try {
             when (request.message.content) {
-                is MessageContent.Mms -> sendMMS(request)
+                // A single MMS modem operation covers multiple recipients. Until the
+                // group attempt can be reserved and reconciled atomically, fail closed.
+                is MessageContent.Mms -> {
+                    machine.transitionRecipients(
+                        request.message.id, ProcessingState.Failed,
+                        "MMS disabled: durable group-attempt ledger not implemented"
+                    )
+                    return false
+                }
                 else -> sendSMS(request)
             }
             return true
+        } catch (uncertain: AttemptUncertainException) {
+            // A physical send MAY have happened. The attempt is durable and must never
+            // be automatically re-enqueued, regardless of process interruption.
+            logsService.insert(
+                LogEntry.Priority.ERROR, MODULE_NAME,
+                "SMS attempt outcome UNKNOWN; reconciliation required",
+            )
+            return false
         } catch (deferred: SendingDeferredException) {
             // This is not a failed SMS. Keep the message/remaining recipients Pending.
             logsService.insert(
@@ -523,7 +566,8 @@ class MessagesService(
             dao.updateSimNumber(id, simNumber + 1)
         }
 
-        val sendFn: (String, PendingIntent, PendingIntent?) -> Unit =
+        var partCount = 1
+        val sendFn: (String, List<PendingIntent>, List<PendingIntent>?) -> Unit =
             when (val content = message.content) {
                 is MessageContent.Text -> {
                     // Handle text messages
@@ -533,26 +577,22 @@ class MessagesService(
                     }
 
                     val parts = smsManager.divideMessage(text)
+                    partCount = parts.size
                     dao.updatePartsCount(id, parts.size)
 
                     if (parts.size > 1) {
-                        { phoneNumber: String, sentIntent: PendingIntent, deliveredIntent: PendingIntent? ->
+                        { phoneNumber: String, sentIntents: List<PendingIntent>, deliveredIntents: List<PendingIntent>? ->
                             smsManager.sendMultipartTextMessage(
-                                phoneNumber,
-                                null,
-                                parts,
-                                ArrayList(List(parts.size) { sentIntent }),
-                                deliveredIntent?.let { intent -> ArrayList(List(parts.size) { intent }) }
+                                phoneNumber, null, parts,
+                                ArrayList(sentIntents),
+                                deliveredIntents?.let { ArrayList(it) },
                             )
                         }
                     } else {
-                        { phoneNumber: String, sentIntent: PendingIntent, deliveredIntent: PendingIntent? ->
+                        { phoneNumber: String, sentIntents: List<PendingIntent>, deliveredIntents: List<PendingIntent>? ->
                             smsManager.sendTextMessage(
-                                phoneNumber,
-                                null,
-                                text,
-                                sentIntent,
-                                deliveredIntent
+                                phoneNumber, null, text,
+                                sentIntents.single(), deliveredIntents?.single(),
                             )
                         }
                     }
@@ -576,82 +616,96 @@ class MessagesService(
                     }
                     dao.updatePartsCount(id, 1);
 
-                    { phoneNumber: String, sentIntent: PendingIntent, deliveredIntent: PendingIntent? ->
+                    { phoneNumber: String, sentIntents: List<PendingIntent>, deliveredIntents: List<PendingIntent>? ->
                         smsManager.sendDataMessage(
-                            phoneNumber,
-                            null,  // scAddress
-                            content.port.toShort(),
-                            decodedData,
-                            sentIntent,
-                            deliveredIntent
+                            phoneNumber, null, content.port.toShort(), decodedData,
+                            sentIntents.single(), deliveredIntents?.single(),
                         )
                     }
                 }
             }
 
-        request.message.phoneNumbers
-            .forEach { sourcePhoneNumber ->
-                val requestCode = id.hashCode()
-                val sentIntent = PendingIntent.getBroadcast(
-                    context,
-                    requestCode,
-                    Intent(
-                        EventsReceiver.ACTION_SENT,
-                        Uri.parse("$id|$sourcePhoneNumber"),
-                        context,
-                        EventsReceiver::class.java
-                    ),
-                    PendingIntent.FLAG_MUTABLE
+        request.message.phoneNumbers.forEach { sourcePhoneNumber ->
+            try {
+                val normalizedPhoneNumber = decryptAndNormalizePhone(
+                    sourcePhoneNumber, message.isEncrypted, request.params.skipPhoneValidation,
                 )
-                val deliveredIntent = when (request.params.withDeliveryReport) {
-                    false -> null
-                    true -> PendingIntent.getBroadcast(
-                        context,
-                        requestCode,
-                        Intent(
-                            EventsReceiver.ACTION_DELIVERED,
-                            Uri.parse("$id|$sourcePhoneNumber"),
-                            context,
-                            EventsReceiver::class.java
-                        ),
-                        PendingIntent.FLAG_MUTABLE
-                    )
-                }
+                // The policy lock serializes policy update, transactionally reserving
+                // this recipient, and *starting* the synchronous modem call.
+                hardSendingPolicy.requireAllowed {
+                    val attempt = attempts.reserve(
+                        id, sourcePhoneNumber, partCount,
+                        hardSendingPolicyVersionUnsafe(),
+                    ) ?: return@requireAllowed // already reserved or no longer Pending
 
-                try {
-                    val normalizedPhoneNumber = decryptAndNormalizePhone(
-                        sourcePhoneNumber, message.isEncrypted, request.params.skipPhoneValidation,
-                    )
-
-                    // Recheck after SIM selection, decryption and normalization, directly
-                    // before each actual SmsManager call (also for priority >= 100).
-                    hardSendingPolicy.requireAllowed {
-                        sendFn(normalizedPhoneNumber, sentIntent, deliveredIntent)
+                    val sentIntents = (0 until partCount).map { index ->
+                        attemptIntent(id, sourcePhoneNumber, attempt.attemptId, index, EventsReceiver.ACTION_SENT)
                     }
+                    val deliveryIntents = if (request.params.withDeliveryReport) {
+                        (0 until partCount).map { index ->
+                            attemptIntent(id, sourcePhoneNumber, attempt.attemptId, index, EventsReceiver.ACTION_DELIVERED)
+                        }
+                    } else null
 
-                    machine.transitionRecipient(id, sourcePhoneNumber, ProcessingState.Processed)
-                } catch (deferred: SendingDeferredException) {
-                    // A multi-recipient request may have processed earlier recipients.
-                    // Leave remaining recipients Pending; no new physical attempts.
-                    throw deferred
-                } catch (th: Throwable) {
-                    logsService.insert(
-                        LogEntry.Priority.ERROR,
-                        MODULE_NAME,
-                        "Can't send message: " + th.message,
-                        mapOf(
-                            "stacktrace" to th.stackTraceToString(),
-                        )
-                    )
-
-                    machine.transitionRecipient(
-                        id,
-                        sourcePhoneNumber,
-                        ProcessingState.Failed,
-                        "sendSMS: " + th.message
-                    )
+                    try {
+                        check(attempts.markInvoking(attempt.attemptId, System.currentTimeMillis()) == 1)
+                        sendFn(normalizedPhoneNumber, sentIntents, deliveryIntents)
+                    } catch (e: Throwable) {
+                        // The modem may already have accepted some/all parts.
+                        attempts.markUnknown(attempt.attemptId)
+                        throw AttemptUncertainException()
+                    }
                 }
+            } catch (deferred: SendingDeferredException) {
+                throw deferred
+            } catch (uncertain: AttemptUncertainException) {
+                throw uncertain
+            } catch (error: Throwable) {
+                // Any failure before reservation did not call the modem.
+                // On DB storage errors keep Pending and abort this batch; fail safely.
+                logsService.insert(
+                    LogEntry.Priority.ERROR, MODULE_NAME,
+                    "Cannot prepare durable SMS attempt; sending stopped",
+                )
+                throw AttemptUncertainException()
             }
+        }
+    }
+
+    /** Only called under SendingPolicyGate's lock while currentDecision is allowed. */
+    private fun hardSendingPolicyVersionUnsafe(): Long =
+        requireNotNull(hardSendingPolicy.currentDecision().policyVersion) {
+            "Sending policy must exist before a physical attempt"
+        }
+
+    private fun attemptIntent(
+        messageId: String,
+        phone: String,
+        attemptId: String,
+        partIndex: Int,
+        action: String,
+    ): PendingIntent {
+        val intent = Intent(
+            action,
+            Uri.parse("smsattempt:" + attemptId + "/" + partIndex + "/" + action),
+            context,
+            EventsReceiver::class.java,
+        )
+        intent.putExtra(EXTRA_ATTEMPT_ID, attemptId)
+        intent.putExtra(EXTRA_PART_INDEX, partIndex)
+        return PendingIntent.getBroadcast(
+            context, (attemptId + partIndex + action).hashCode(),
+            intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+        )
+    }
+
+    private class AttemptUncertainException : RuntimeException(
+        "Durable attempt is indeterminate; manual reconciliation required"
+    )
+
+    private companion object {
+        const val EXTRA_ATTEMPT_ID = "crd_attempt_id"
+        const val EXTRA_PART_INDEX = "crd_part_index"
     }
 
     @SuppressLint("NewApi")
