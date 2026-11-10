@@ -36,6 +36,8 @@ import me.capcom.smsgateway.modules.messages.data.SendParams
 import me.capcom.smsgateway.modules.messages.data.SendRequest
 import me.capcom.smsgateway.modules.messages.data.StoredSendRequest
 import me.capcom.smsgateway.modules.messages.exceptions.ConflictException
+import me.capcom.smsgateway.modules.messages.policy.SendingDeferredException
+import me.capcom.smsgateway.modules.messages.policy.SendingPolicyGate
 import me.capcom.smsgateway.modules.messages.workers.LogTruncateWorker
 import me.capcom.smsgateway.modules.messages.workers.SendMessagesWorker
 import me.capcom.smsgateway.modules.mms.MmsSender
@@ -52,6 +54,7 @@ class MessagesService(
     private val machine: MessageStateService,
     private val logsService: LogsService,
     private val mmsSender: MmsSender,
+    private val hardSendingPolicy: SendingPolicyGate,
 ) {
     /**
      * Serializes the worker (KEEP/REPLACE) decisions made from the DB snapshot
@@ -299,7 +302,9 @@ class MessagesService(
                 }
 
                 if (!withContext(NonCancellable) { sendMessage(message) }) {
-                    // if message was not sent - don't need any delay before next message
+                    // A policy-deferred message stays Pending; never spin on the same entry.
+                    // A new policy must explicitly wake the worker when no next window exists.
+                    if (!hardSendingPolicy.currentDecision().allowed) return
                     continue
                 }
 
@@ -402,6 +407,21 @@ class MessagesService(
                 else -> sendSMS(request)
             }
             return true
+        } catch (deferred: SendingDeferredException) {
+            // This is not a failed SMS. Keep the message/remaining recipients Pending.
+            logsService.insert(
+                LogEntry.Priority.INFO,
+                MODULE_NAME,
+                "Modem attempt deferred by hard sending policy",
+                mapOf(
+                    "policyVersion" to deferred.deferred.decision.policyVersion,
+                    "reason" to deferred.deferred.decision.reason?.name,
+                ),
+            )
+            deferred.deferred.nextAllowedAt?.let {
+                SendMessagesWorker.start(context, true, it.toEpochMilli())
+            }
+            return false
         } catch (e: Exception) {
             e.printStackTrace()
             machine.transitionRecipients(
@@ -603,9 +623,17 @@ class MessagesService(
                         sourcePhoneNumber, message.isEncrypted, request.params.skipPhoneValidation,
                     )
 
-                    sendFn(normalizedPhoneNumber, sentIntent, deliveredIntent)
+                    // Recheck after SIM selection, decryption and normalization, directly
+                    // before each actual SmsManager call (also for priority >= 100).
+                    hardSendingPolicy.requireAllowed {
+                        sendFn(normalizedPhoneNumber, sentIntent, deliveredIntent)
+                    }
 
                     machine.transitionRecipient(id, sourcePhoneNumber, ProcessingState.Processed)
+                } catch (deferred: SendingDeferredException) {
+                    // A multi-recipient request may have processed earlier recipients.
+                    // Leave remaining recipients Pending; no new physical attempts.
+                    throw deferred
                 } catch (th: Throwable) {
                     logsService.insert(
                         LogEntry.Priority.ERROR,

@@ -99,7 +99,7 @@ class SendingPolicyEvaluator(private val clock: Clock = Clock.systemUTC()) {
         from: Instant = clock.instant(),
         horizonDays: Long = 21,
     ): Instant? {
-        if (policy == null || policy.paused || horizonDays !in 1..60) return null
+        if (policy == null || policy.paused || horizonDays !in 1L..60L) return null
         val zone = zoneOrNull(policy) ?: return null
         if (evaluate(policy, from).allowed) return from
         val localStart = from.atZone(zone).toLocalDate()
