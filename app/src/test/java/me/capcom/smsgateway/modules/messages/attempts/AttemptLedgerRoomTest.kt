@@ -74,9 +74,18 @@ class AttemptLedgerRoomTest {
     @Test fun failedSegmentNeverBecomesSuccessfulByDuplicateCallback() {
         val dao = db.messageAttemptsDao()
         val first = dao.reserve("m1", "+48111111111", 2, 1)!!
-        assertEquals("FAILED", dao.recordSendCallback(first.attemptId, 0, false))
-        assertEquals("FAILED", dao.recordSendCallback(first.attemptId, 0, true))
-        assertEquals("FAILED", dao.recordSendCallback(first.attemptId, 1, true))
+        assertEquals("UNKNOWN", dao.recordSendCallback(first.attemptId, 0, false))
+        assertEquals("UNKNOWN", dao.recordSendCallback(first.attemptId, 0, true))
+        assertEquals("UNKNOWN", dao.recordSendCallback(first.attemptId, 1, true))
+        assertNull(dao.reserve("m1", "+48111111111", 2, 1))
+    }
+
+    @Test fun partiallySentMultipartIsUnknownNotDefinitelyFailed() {
+        val dao = db.messageAttemptsDao()
+        val first = dao.reserve("m1", "+48111111111", 2, 1)!!
+        assertEquals("UNKNOWN", dao.recordSendCallback(first.attemptId, 0, false))
+        assertEquals("UNKNOWN", dao.recordSendCallback(first.attemptId, 1, true))
+        assertEquals("UNKNOWN", dao.byAttemptId(first.attemptId)!!.state)
         assertNull(dao.reserve("m1", "+48111111111", 2, 1))
     }
 

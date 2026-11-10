@@ -106,6 +106,9 @@ interface MessageAttemptsDao {
     @Query("SELECT COUNT(*) FROM message_attempt_parts WHERE attemptId = :id AND sendState = 'FAILED'")
     fun failedSendParts(id: String): Int
 
+    @Query("SELECT COUNT(*) FROM message_attempt_parts WHERE attemptId = :id AND sendState = 'SENT'")
+    fun successfulSendParts(id: String): Int
+
     @Query("SELECT COUNT(*) FROM message_attempt_parts WHERE attemptId = :id AND deliveryState = 'PENDING'")
     fun pendingDeliveryParts(id: String): Int
 
@@ -120,8 +123,13 @@ interface MessageAttemptsDao {
         val attempt = byAttemptId(id) ?: return null
         markPartSent(id, part, if (succeeded) "SENT" else "FAILED")
         if (failedSendParts(id) > 0) {
-            setAttemptStatus(id, "FAILED")
-            return "FAILED"
+            // If any other part succeeded or is still pending, this multipart
+            // attempt has a potentially partial physical result: never label
+            // the entire logical message as definitely FAILED.
+            val mixedOrUnresolved = successfulSendParts(id) > 0 || pendingSendParts(id) > 0
+            val outcome = if (mixedOrUnresolved) "UNKNOWN" else "FAILED"
+            setAttemptStatus(id, outcome)
+            return outcome
         }
         if (pendingSendParts(id) == 0) {
             setAttemptStatus(id, "SENT")
