@@ -45,6 +45,7 @@ import me.capcom.smsgateway.modules.localserver.routes.DocsRoutes
 import me.capcom.smsgateway.modules.localserver.routes.InboxRoutes
 import me.capcom.smsgateway.modules.localserver.routes.LogsRoutes
 import me.capcom.smsgateway.modules.localserver.routes.MessagesRoutes
+import me.capcom.smsgateway.modules.localserver.routes.PolicyRoutes
 import me.capcom.smsgateway.modules.localserver.routes.WebhooksRoutes
 import me.capcom.smsgateway.modules.notifications.NotificationsService
 import org.koin.android.ext.android.get
@@ -156,7 +157,7 @@ class WebService : Service() {
                             it.register(this)
                         }
                     }
-                    MessagesRoutes(applicationContext, get(), get(), get()).let {
+                    MessagesRoutes(applicationContext, get(), get(), get(), get()).let {
                         route("/message") {
                             it.register(this)
                         }
@@ -184,6 +185,9 @@ class WebService : Service() {
                     route("/settings") {
                         me.capcom.smsgateway.modules.localserver.routes.SettingsRoutes(get())
                             .register(this)
+                    }
+                    route("/policy") {
+                        PolicyRoutes(get(), get(), applicationContext).register(this)
                     }
                     route("/docs") {
                         DocsRoutes(get()).register(this)

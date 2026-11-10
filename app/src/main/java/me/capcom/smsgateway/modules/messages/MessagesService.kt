@@ -649,7 +649,12 @@ class MessagesService(
 
                     try {
                         check(attempts.markInvoking(attempt.attemptId, System.currentTimeMillis()) == 1)
-                        sendFn(normalizedPhoneNumber, sentIntents, deliveryIntents)
+                        // After the durable claim and preparation, re-check the clock
+                        // immediately before invoking the modem. Crossing a window during
+                        // reservation must not start a new physical attempt.
+                        hardSendingPolicy.requireAllowed {
+                            sendFn(normalizedPhoneNumber, sentIntents, deliveryIntents)
+                        }
                     } catch (e: Throwable) {
                         // The modem may already have accepted some/all parts.
                         attempts.markUnknown(attempt.attemptId)
