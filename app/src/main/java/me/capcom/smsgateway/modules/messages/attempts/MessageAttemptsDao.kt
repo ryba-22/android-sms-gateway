@@ -71,6 +71,29 @@ interface MessageAttemptsDao {
     @Query("UPDATE message_attempts SET state = 'UNKNOWN' WHERE attemptId = :id AND state IN ('RESERVED', 'INVOKING')")
     fun markUnknown(id: String): Int
 
+    @Query("DELETE FROM message_attempts WHERE attemptId = :id AND state = 'INVOKING'")
+    fun deleteKnownNotInvoked(id: String): Int
+
+    @Query("UPDATE messagerecipient SET state = 'Pending' WHERE messageId = :id AND phoneNumber = :phone AND state = 'Processed'")
+    fun restoreRecipientToPending(id: String, phone: String): Int
+
+    @Query("UPDATE message SET state = 'Pending', processedAt = NULL WHERE id = :id AND state = 'Processed'")
+    fun restoreMessageToPending(id: String): Int
+
+    /**
+     * Call ONLY if the policy gate rejected immediately before the modem lambda:
+     * in that control path sendFn was definitely NOT called. Never call after
+     * exceptions from SmsManager, restart, timeout, or a missing sent callback.
+     */
+    @Transaction
+    fun releaseKnownNotInvoked(id: String) {
+        val attempt = byAttemptId(id) ?: error("Missing reserved attempt")
+        check(attempt.state == "INVOKING")
+        check(deleteKnownNotInvoked(id) == 1)
+        check(restoreRecipientToPending(attempt.messageId, attempt.phoneNumber) == 1)
+        restoreMessageToPending(attempt.messageId)
+    }
+
     @Query("UPDATE message_attempt_parts SET sendState = :result WHERE attemptId = :id AND partIndex = :part AND sendState = 'PENDING'")
     fun markPartSent(id: String, part: Int, result: String): Int
 

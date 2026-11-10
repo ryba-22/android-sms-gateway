@@ -452,7 +452,9 @@ class MessagesService(
                 LogEntry.Priority.ERROR, MODULE_NAME,
                 "SMS attempt outcome UNKNOWN; reconciliation required",
             )
-            return false
+            // Stop the worker: a persistent DB error with a Pending recipient must
+            // not cause a hot retry loop. WorkManager applies bounded backoff.
+            throw uncertain
         } catch (deferred: SendingDeferredException) {
             // This is not a failed SMS. Keep the message/remaining recipients Pending.
             logsService.insert(
@@ -655,9 +657,19 @@ class MessagesService(
                         // After the durable claim and preparation, re-check the clock
                         // immediately before invoking the modem. Crossing a window during
                         // reservation must not start a new physical attempt.
-                        hardSendingPolicy.requireAllowed {
-                            sendFn(normalizedPhoneNumber, sentIntents, deliveryIntents)
+                        try {
+                            hardSendingPolicy.requireAllowed {
+                                sendFn(normalizedPhoneNumber, sentIntents, deliveryIntents)
+                            }
+                        } catch (deferred: SendingDeferredException) {
+                            // The final check denied access *before* the modem lambda
+                            // started. Revert the claim atomically so it can resume
+                            // next window. All other failures remain UNKNOWN.
+                            attempts.releaseKnownNotInvoked(attempt.attemptId)
+                            throw deferred
                         }
+                    } catch (deferred: SendingDeferredException) {
+                        throw deferred
                     } catch (e: Throwable) {
                         // The modem may already have accepted some/all parts.
                         attempts.markUnknown(attempt.attemptId)

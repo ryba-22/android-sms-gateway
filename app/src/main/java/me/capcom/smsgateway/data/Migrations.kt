@@ -102,7 +102,7 @@ val MIGRATION_25_26 = object : Migration(25, 26) {
                 messageId TEXT NOT NULL, phoneNumber TEXT NOT NULL, attemptId TEXT NOT NULL,
                 reservedAt INTEGER NOT NULL, invokedAt INTEGER, state TEXT NOT NULL, policyVersion INTEGER NOT NULL,
                 PRIMARY KEY(messageId, phoneNumber),
-                FOREIGN KEY(messageId, phoneNumber) REFERENCES messagerecipient(messageId, phoneNumber)
+                FOREIGN KEY(messageId, phoneNumber) REFERENCES MessageRecipient(messageId, phoneNumber)
                     ON UPDATE NO ACTION ON DELETE CASCADE
             )
         """.trimIndent())
