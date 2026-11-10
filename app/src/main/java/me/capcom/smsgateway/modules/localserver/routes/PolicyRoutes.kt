@@ -149,8 +149,9 @@ class PolicyRoutes(
     }
 
     private fun wakeIfPermitted() {
-        if (gate.currentDecision().allowed) {
-            SendMessagesWorker.start(context, true, SendMessagesWorker.IMMEDIATE)
-        }
+        // Applying a policy at 22:00 must still wake the queue tomorrow at 08:00.
+        // WorkManager timing is advisory; the hard gate checks again on execution.
+        val next = gate.nextAllowedAt() ?: return
+        SendMessagesWorker.start(context, true, next.toEpochMilli())
     }
 }

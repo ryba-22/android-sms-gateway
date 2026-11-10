@@ -44,6 +44,12 @@ interface MessageAttemptsDao {
     @Query("INSERT OR IGNORE INTO recipientstate(messageId, phoneNumber, state, updatedAt) VALUES (:id, :phone, 'Processed', :at)")
     fun recordRecipientClaim(id: String, phone: String, at: Long)
 
+    @Query("INSERT OR IGNORE INTO messagestate(messageId, state, updatedAt) VALUES (:id, 'Processed', :at)")
+    fun recordMessageClaim(id: String, at: Long)
+
+    @Query("UPDATE message_attempts SET state = 'UNKNOWN' WHERE state IN ('RESERVED', 'INVOKING') AND reservedAt <= :olderThan")
+    fun quarantineAbandoned(olderThan: Long): Int
+
     @Transaction
     fun reserve(id: String, phone: String, partCount: Int, policyVersion: Long): MessageAttempt? {
         require(partCount > 0)
@@ -55,7 +61,7 @@ interface MessageAttemptsDao {
         insertParts((0 until partCount).map { MessageAttemptPart(attempt.attemptId, it, "PENDING", "PENDING") })
         check(claimRecipient(id, phone) == 1) { "Recipient claim must be atomic with reservation" }
         recordRecipientClaim(id, phone, now)
-        markMessageProcessedIfReady(id, now)
+        if (markMessageProcessedIfReady(id, now) == 1) recordMessageClaim(id, now)
         return attempt
     }
 

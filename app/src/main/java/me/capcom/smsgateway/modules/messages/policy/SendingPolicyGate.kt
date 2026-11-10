@@ -49,6 +49,10 @@ class SendingPolicyGate(
         evaluator.evaluate(readFailClosed(), clock.instant())
     }
 
+    fun nextAllowedAt(): Instant? = synchronized(lock) {
+        evaluator.nextAllowedAt(readFailClosed(), clock.instant())
+    }
+
     fun applyPolicy(policy: SendingPolicy) = synchronized(lock) {
         require(policy.version > 0) { "Policy version must be positive" }
         require(policy.weeklyAllowedWindows.isNotEmpty() || policy.paused) { "No allowed windows" }

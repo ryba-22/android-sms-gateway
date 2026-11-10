@@ -305,6 +305,9 @@ class MessagesService(
     }
 
     internal suspend fun sendPendingMessages() {
+        // Reclassify old unresolved reservations. A later Android callback may
+        // still reconcile them; this never makes the recipient eligible for retry.
+        attempts.quarantineAbandoned(System.currentTimeMillis() - 5 * 60_000L)
         try {
             var previousPriority = Message.PRIORITY_MIN
 
