@@ -1,0 +1,94 @@
+name: Android validation (no SMS)
+
+on:
+  push:
+    branches: ["feat/hard-sending-policy-implementation"]
+    paths:
+      - ".github/workflows/android-validation.yml"
+      - "app/**"
+      - "ops/tests/**"
+      - "build.gradle"
+      - "settings.gradle"
+      - "gradle/**"
+      - "gradlew"
+      - "gradle.properties"
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/android-validation.yml"
+      - "app/**"
+      - "build.gradle"
+      - "settings.gradle"
+      - "gradle/**"
+      - "gradlew"
+      - "gradle.properties"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug-validation:
+    name: Compile debug APK and JVM unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK command-line tools
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-33 build-tools;33.0.2"
+
+      - name: Provide CI-only placeholder Firebase config
+        # The application uses the google-services Gradle plugin, which requires
+        # a JSON file at compile time. Fake identifiers mean this is a DEBUG,
+        # test-only APK, never a production signing or real Firebase release.
+        run: |
+          cat > app/google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_number": "123456789012",
+              "project_id": "android-sms-gateway-ci-only"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:123456789012:android:0000000000000000",
+                  "android_client_info": {
+                    "package_name": "me.capcom.smsgateway"
+                  }
+                },
+                "api_key": [
+                  {"current_key": "NOT_A_REAL_FIREBASE_API_KEY_CI_ONLY"}
+                ]
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+
+      - name: Build debug and run JVM unit tests
+        run: ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest
+
+      - name: Verify additive Room migration with SQLite
+        run: python3 -m unittest discover -s ops/tests -p "test_*.py" -v
+
+      - name: Verify safety-test debug APK exists
+        run: |
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload isolated-test APK (NOT production)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sms-gateway-test-only-${{ github.run_id }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 3
+          if-no-files-found: error

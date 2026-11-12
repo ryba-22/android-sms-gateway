@@ -29,6 +29,7 @@ import me.capcom.smsgateway.modules.localserver.domain.messages.MmsMessage
 import me.capcom.smsgateway.modules.localserver.domain.messages.PostMessageRequest
 import me.capcom.smsgateway.modules.localserver.domain.messages.TextMessage
 import me.capcom.smsgateway.modules.messages.MessagesService
+import me.capcom.smsgateway.modules.messages.attempts.MessageAttemptsDao
 import me.capcom.smsgateway.modules.messages.data.Message
 import me.capcom.smsgateway.modules.messages.data.SendParams
 import me.capcom.smsgateway.modules.messages.data.SendRequest
@@ -41,6 +42,7 @@ class MessagesRoutes(
     private val messagesService: MessagesService,
     private val receiverService: ReceiverService,
     private val settings: LocalServerSettings,
+    private val attempts: MessageAttemptsDao,
 ) {
     fun register(routing: Route) {
         routing.apply {
@@ -52,6 +54,14 @@ class MessagesRoutes(
     }
 
     private fun Route.messagesRoutes() {
+        get("{id}/attempts") {
+            if (!requireScope(AuthScopes.MessagesRead)) return@get
+            val id = call.parameters["id"] ?: return@get call.respond(
+                HttpStatusCode.BadRequest, mapOf("message" to "Missing message ID")
+            )
+            call.respond(attempts.byMessageId(id))
+        }
+
         get {
             if (!requireScope(AuthScopes.MessagesRead)) return@get
             // Parse and validate parameters

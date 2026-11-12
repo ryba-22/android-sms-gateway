@@ -94,3 +94,28 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
         )
     }
 }
+// Physical-send intent ledger is additive; existing message rows are not rewritten.
+val MIGRATION_25_26 = object : Migration(25, 26) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("""
+            CREATE TABLE IF NOT EXISTS message_attempts (
+                messageId TEXT NOT NULL, phoneNumber TEXT NOT NULL, attemptId TEXT NOT NULL,
+                reservedAt INTEGER NOT NULL, invokedAt INTEGER, state TEXT NOT NULL, policyVersion INTEGER NOT NULL,
+                PRIMARY KEY(messageId, phoneNumber),
+                FOREIGN KEY(messageId, phoneNumber) REFERENCES MessageRecipient(messageId, phoneNumber)
+                    ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+        """.trimIndent())
+        database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_message_attempts_attemptId ON message_attempts(attemptId)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_message_attempts_messageId_phoneNumber ON message_attempts(messageId, phoneNumber)")
+        database.execSQL("""
+            CREATE TABLE IF NOT EXISTS message_attempt_parts (
+                attemptId TEXT NOT NULL, partIndex INTEGER NOT NULL, sendState TEXT NOT NULL,
+                deliveryState TEXT NOT NULL, PRIMARY KEY(attemptId, partIndex),
+                FOREIGN KEY(attemptId) REFERENCES message_attempts(attemptId)
+                    ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+        """.trimIndent())
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_message_attempt_parts_attemptId ON message_attempt_parts(attemptId)")
+    }
+}

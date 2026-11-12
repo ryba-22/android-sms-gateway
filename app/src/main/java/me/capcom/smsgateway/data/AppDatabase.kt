@@ -7,6 +7,9 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import me.capcom.smsgateway.data.dao.MessagesDao
 import me.capcom.smsgateway.data.dao.TokensDao
+import me.capcom.smsgateway.modules.messages.attempts.MessageAttempt
+import me.capcom.smsgateway.modules.messages.attempts.MessageAttemptPart
+import me.capcom.smsgateway.modules.messages.attempts.MessageAttemptsDao
 import me.capcom.smsgateway.data.entities.Message
 import me.capcom.smsgateway.data.entities.MessageRecipient
 import me.capcom.smsgateway.data.entities.MessageState
@@ -28,6 +31,8 @@ import me.capcom.smsgateway.modules.gateway.inbox.InboxUploadEntity
 @Database(
     entities = [
         Message::class,
+        MessageAttempt::class,
+        MessageAttemptPart::class,
         MessageRecipient::class,
         RecipientState::class,
         MessageState::class,
@@ -39,7 +44,7 @@ import me.capcom.smsgateway.modules.gateway.inbox.InboxUploadEntity
         IncomingMessage::class,
         DeviceKey::class,
     ],
-    version = 25,
+    version = 26,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -70,6 +75,7 @@ import me.capcom.smsgateway.modules.gateway.inbox.InboxUploadEntity
 
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun messageAttemptsDao(): MessageAttemptsDao
     abstract fun messagesDao(): MessagesDao
     abstract fun webhooksDao(): WebHooksDao
     abstract fun webhookQueueDao(): WebhookQueueDao
@@ -90,6 +96,7 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_7_8,
                     MIGRATION_13_14,
                     MIGRATION_21_22,
+                    MIGRATION_25_26,
                 )
                 .allowMainThreadQueries()
                 .build()

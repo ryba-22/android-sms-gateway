@@ -56,6 +56,7 @@ android {
         }
     }
     compileOptions {
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
@@ -78,6 +79,7 @@ android {
 }
 
 dependencies {
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
     def ktor_version = "2.2.4"
     def okhttp_version = "4.10.0"
     def room_version = "2.4.3"
@@ -136,6 +138,7 @@ dependencies {
     implementation "io.insert-koin:koin-android:$koin_version"
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.11.1")
     testImplementation("androidx.arch.core:core-testing:2.1.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutines_version")
     androidTestImplementation("androidx.test.ext:junit:1.1.3")

@@ -11,6 +11,7 @@ import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import me.capcom.smsgateway.BuildConfig
 import me.capcom.smsgateway.domain.MessageContent
+import me.capcom.smsgateway.modules.messages.policy.SendingPolicyGate
 import me.capcom.smsgateway.modules.mms.pdu.aosp.CharacterSets
 import me.capcom.smsgateway.modules.mms.pdu.aosp.EncodedStringValue
 import me.capcom.smsgateway.modules.mms.pdu.aosp.PduBody
@@ -23,6 +24,7 @@ import me.capcom.smsgateway.modules.mms.pdu.aosp.PduComposer as AospPduComposer
 
 class MmsSender(
     private val context: Context,
+    private val hardSendingPolicy: SendingPolicyGate,
 ) {
     fun send(
         messageId: String,
@@ -67,13 +69,16 @@ class MmsSender(
 
         val manager = getSmsManager(subscriptionId)
         try {
-            manager.sendMultimediaMessage(
-                context,
-                uri,
-                null,
-                null,
-                sentIntent
-            )
+            // MMS shares the same non-bypassable gate as SMS and data SMS.
+            hardSendingPolicy.requireAllowed {
+                manager.sendMultimediaMessage(
+                    context,
+                    uri,
+                    null,
+                    null,
+                    sentIntent
+                )
+            }
         } catch (e: Exception) {
             file.delete()
             throw e
