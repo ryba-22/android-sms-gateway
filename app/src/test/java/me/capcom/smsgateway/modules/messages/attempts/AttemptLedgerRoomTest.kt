@@ -89,6 +89,30 @@ class AttemptLedgerRoomTest {
         assertNull(dao.reserve("m1", "+48111111111", 2, 1))
     }
 
+    @Test fun cancelledRecipientCannotBeReserved() {
+        val dao = db.messageAttemptsDao()
+        db.openHelper.writableDatabase.execSQL(
+            "UPDATE MessageRecipient SET state = 'Cancelled' " +
+                "WHERE messageId = 'm1' AND phoneNumber = '+48111111111'"
+        )
+        assertNull(dao.reserve("m1", "+48111111111", 1, 1))
+        assertEquals("Cancelled", dao.recipientState("m1", "+48111111111"))
+        assertTrue(dao.byMessageId("m1").isEmpty())
+    }
+
+    @Test fun onceReservedRecipientCannotBeCancelledAsPending() {
+        val dao = db.messageAttemptsDao()
+        assertNotNull(dao.reserve("m1", "+48111111111", 1, 1))
+        // A pending-only cancellation must affect zero rows once the physical
+        // attempt is reserved. The API state machine additionally rejects it.
+        val updated = db.openHelper.writableDatabase.compileStatement(
+            "UPDATE MessageRecipient SET state = 'Cancelled' " +
+                "WHERE messageId = 'm1' AND phoneNumber = '+48111111111' AND state = 'Pending'"
+        ).executeUpdateDelete()
+        assertEquals(0, updated)
+        assertEquals("Processed", dao.recipientState("m1", "+48111111111"))
+    }
+
     @Test fun staleInvokingIsQuarantinedNotResent() {
         val dao = db.messageAttemptsDao()
         val first = dao.reserve("m1", "+48111111111", 1, 1)!!

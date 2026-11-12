@@ -48,8 +48,8 @@ jobs:
 
       - name: Provide CI-only placeholder Firebase config
         # The application uses the google-services Gradle plugin, which requires
-        # a JSON file at compile time. These intentionally fake identifiers are
-        # ONLY for CI; no SMS is sent and the resulting APK is not distributed.
+        # a JSON file at compile time. Fake identifiers mean this is a DEBUG,
+        # test-only APK, never a production signing or real Firebase release.
         run: |
           cat > app/google-services.json <<'JSON'
           {
@@ -80,5 +80,15 @@ jobs:
       - name: Verify additive Room migration with SQLite
         run: python3 -m unittest discover -s ops/tests -p "test_*.py" -v
 
-      - name: Verify APK exists (do not publish)
-        run: test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Verify safety-test debug APK exists
+        run: |
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload isolated-test APK (NOT production)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sms-gateway-test-only-${{ github.run_id }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 3
+          if-no-files-found: error

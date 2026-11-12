@@ -95,6 +95,7 @@ class PolicyRoutes(
                         "allowedNow" to decision.allowed,
                         "reason" to decision.reason?.name,
                         "checkedAt" to decision.checkedAt.toString(),
+                        "nextAllowedAt" to gate.nextAllowedAt()?.toString(),
                     )
                 )
             }
