@@ -231,6 +231,23 @@ class E6DispatchTests(unittest.TestCase):
         self.assertEqual(self.store.get(msg_id)["state"], "ATTEMPT_UNKNOWN")
         self.assertIsNone(self.dispatcher.dispatch_one(explicitly_enabled=True))
 
+    def test_append_only_history_survives_process_restart(self):
+        message_id = self.add(1)
+        self.approve(1)
+        self.dispatcher.dispatch_one(explicitly_enabled=True)
+        self.gateway.sent(message_id)
+        self.dispatcher.reconcile_one()
+        restarted = DispatchStore(self.db_path)
+        self.assertEqual(
+            [event["state"] for event in restarted.history(message_id)],
+            ["DRAFT", "READY", "SUBMITTING", "DEVICE_ACCEPTED", "SENT"],
+        )
+        numbers = [event["sequence"] for event in restarted.history(message_id)]
+        self.assertEqual(numbers, sorted(numbers))
+        self.assertEqual(len(set(numbers)), len(numbers))
+        self.assertNotIn("body", restarted.history(message_id)[0])
+        self.assertNotIn("phone", restarted.history(message_id)[0])
+
     def test_storage_is_owner_only_permissions(self):
         self.assertEqual(self.db_path.stat().st_mode & 0o777, 0o600)
 

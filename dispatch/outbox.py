@@ -111,6 +111,14 @@ class DispatchStore:
                     reserved_at INTEGER NOT NULL,
                     outcome TEXT
                 );
+                CREATE TABLE IF NOT EXISTS dispatch_event (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id TEXT NOT NULL REFERENCES dispatch_message(id),
+                    state TEXT NOT NULL,
+                    occurred_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_dispatch_events_message
+                    ON dispatch_event(message_id, sequence);
             """)
 
     def create_campaign(self, campaign_id: str) -> None:
@@ -149,6 +157,10 @@ class DispatchStore:
                    VALUES (?,?,?,?,?,?,'DRAFT',?,?)""",
                 (message_id, campaign_id, business_key, phone, body, digest, now, now),
             )
+            db.execute(
+                "INSERT INTO dispatch_event(message_id,state,occurred_at) VALUES (?,'DRAFT',?)",
+                (message_id, now),
+            )
         return message_id
 
     def approve(self, campaign_id: str, *, count: int, operator: str) -> None:
@@ -173,6 +185,11 @@ class DispatchStore:
             )
             db.execute(
                 "UPDATE dispatch_message SET state='READY', updated_at=? WHERE campaign_id=? AND state='DRAFT'",
+                (now, campaign_id),
+            )
+            db.execute(
+                """INSERT INTO dispatch_event(message_id,state,occurred_at)
+                   SELECT id,'READY',? FROM dispatch_message WHERE campaign_id=? AND state='READY'""",
                 (now, campaign_id),
             )
 
@@ -203,6 +220,10 @@ class DispatchStore:
                 "INSERT INTO dispatch_attempt(message_id,reserved_at) VALUES (?,?)",
                 (row["id"], now),
             )
+            db.execute(
+                "INSERT INTO dispatch_event(message_id,state,occurred_at) VALUES (?,'SUBMITTING',?)",
+                (row["id"], now),
+            )
             return DispatchRecord(
                 row["id"], row["campaign_id"], row["business_key"],
                 row["phone"], row["body"], "SUBMITTING",
@@ -219,7 +240,24 @@ class DispatchStore:
                 f"UPDATE dispatch_message SET state=?, updated_at=? WHERE id=? AND state IN ({placeholders})",
                 (to_state, now, message_id, *from_states),
             )
+            if cur.rowcount == 1:
+                db.execute(
+                    "UPDATE dispatch_attempt SET outcome=? WHERE message_id=?",
+                    (to_state, message_id),
+                )
+                db.execute(
+                    "INSERT INTO dispatch_event(message_id,state,occurred_at) VALUES (?,?,?)",
+                    (message_id, to_state, now),
+                )
             return cur.rowcount == 1
+
+    def history(self, message_id: str) -> list[dict[str, Any]]:
+        """PII-free append-only state history for audit and operator diagnosis."""
+        with self._connect() as db:
+            return [dict(row) for row in db.execute(
+                """SELECT sequence,state,occurred_at FROM dispatch_event
+                   WHERE message_id=? ORDER BY sequence""", (message_id,),
+            )]
 
     def get(self, message_id: str) -> dict[str, Any]:
         with self._connect() as db:

@@ -11,7 +11,8 @@ Dane biznesowe (CRD Finance, Excel i SMSApp) wyznaczają **adresata, treść, po
 Trwała baza SQLite (lokalna, uprawnienia 0600) zawiera:
 - campaign: id, approved_by, approved_at
 - dispatch_message: stabilne message_id, business_key, telefon, treść, hash, stan
-- dispatch_attempt: rezerwacja próby przekazania do telefonu
+- dispatch_attempt: rezerwacja i wynik próby przekazania do telefonu
+- dispatch_event: append-only historia zmian stanu (bez treści i numeru)
 
 Stany: DRAFT -> READY -> SUBMITTING -> DEVICE_ACCEPTED -> SENT/DELIVERED (lub FAILED). Timeout/niejasna odpowiedź: SUBMISSION_UNKNOWN. Niejednoznaczny status Androida: ATTEMPT_UNKNOWN. Żadnego automatycznego powrotu UNKNOWN do READY.
 
