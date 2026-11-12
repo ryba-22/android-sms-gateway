@@ -78,7 +78,7 @@ jobs:
         run: ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest
 
       - name: Verify additive Room migration with SQLite
-        run: python3 -m unittest discover -s ops/tests -p "test_attempt_migration.py" -v
+        run: python3 -m unittest discover -s ops/tests -p "test_*.py" -v
 
       - name: Verify APK exists (do not publish)
         run: test -s app/build/outputs/apk/debug/app-debug.apk

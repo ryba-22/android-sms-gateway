@@ -203,11 +203,16 @@ class WebService : Service() {
     private val port = settings.port
     private val username = settings.username
     private val password = settings.password
+    private var serverStarted = false
 
     override fun onCreate() {
         super.onCreate()
 
+        // startForegroundService() must be followed by startForeground() promptly.
+        // Starting Netty first may delay promotion on a slow or busy device.
+        promoteToForeground()
         server.start()
+        serverStarted = true
         wakeLock.acquire()
         wifiLock.acquire()
 
@@ -215,6 +220,13 @@ class WebService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Android may recreate this service with a null intent after killing
+        // the process. The durable SMS queue is owned by MessagesService/Room.
+        // Explicit Stop still prevents a sticky restart.
+        return START_STICKY
+    }
+
+    private fun promoteToForeground() {
         val notification = notificationsService.makeNotification(
             this,
             NotificationsService.NOTIFICATION_ID_LOCAL_SERVICE,
@@ -225,8 +237,6 @@ class WebService : Service() {
         )
 
         startForeground(NotificationsService.NOTIFICATION_ID_LOCAL_SERVICE, notification)
-
-        return super.onStartCommand(intent, flags, startId)
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -234,9 +244,10 @@ class WebService : Service() {
     }
 
     override fun onDestroy() {
-        wifiLock.release()
-        wakeLock.release()
-        thread { server.stop() }
+        // Lifecycle failure may occur before both locks have been acquired.
+        if (wifiLock.isHeld) wifiLock.release()
+        if (wakeLock.isHeld) wakeLock.release()
+        if (serverStarted) thread { server.stop() }
 
         stopForeground(true)
 
