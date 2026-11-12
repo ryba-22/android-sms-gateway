@@ -77,7 +77,7 @@
         <receiver
             android:name=".receivers.EventsReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="me.capcom.smsgateway.ACTION_SENT" />
                 <action android:name="me.capcom.smsgateway.ACTION_DELIVERED" />

@@ -26,6 +26,13 @@ class LocalServerResilienceTest(unittest.TestCase):
         self.assertEqual(len(server), 1)
         self.assertEqual(server[0].get(ANDROID + "exported"), "false")
 
+    def test_sms_result_receiver_is_private_to_application(self):
+        receivers = self.manifest.findall("./application/receiver")
+        results = [r for r in receivers
+                   if (r.get(ANDROID + "name") or "").endswith(".EventsReceiver")]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].get(ANDROID + "exported"), "false")
+
     def test_shutdown_does_not_relaunch_gateway(self):
         boot = [r for r in self.manifest.findall("./application/receiver")
                 if (r.get(ANDROID + "name") or "").endswith(".BootReceiver")]

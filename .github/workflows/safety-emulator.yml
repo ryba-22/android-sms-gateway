@@ -62,7 +62,7 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell am instrument -w -e class me.capcom.smsgateway.modules.messages.policy.SafetyInstrumentedTest me.capcom.smsgateway.test/androidx.test.runner.AndroidJUnitRunner | tee safety-output.txt
-            grep -q "OK (3 tests)" safety-output.txt
+            grep -q "OK (4 tests)" safety-output.txt
             ! grep -q "FAILURES!!!" safety-output.txt
 
       - name: Upload emulator failure output only

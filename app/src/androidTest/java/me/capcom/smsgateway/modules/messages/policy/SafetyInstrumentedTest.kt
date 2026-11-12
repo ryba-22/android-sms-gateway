@@ -1,5 +1,8 @@
 package me.capcom.smsgateway.modules.messages.policy
 
+import android.content.ComponentName
+import android.content.pm.PackageManager
+import me.capcom.smsgateway.receivers.EventsReceiver
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -56,6 +59,13 @@ class SafetyInstrumentedTest {
         assertTrue(reloaded.invokeModem { invoked++ } is GateResult.Deferred)
         assertEquals(1, invoked)
         assertEquals(1L, reloaded.currentDecision().policyVersion)
+    }
+
+    @Test fun sentCallbackReceiverNotPubliclyExported() {
+        val receiver = context.packageManager.getReceiverInfo(
+            ComponentName(context, EventsReceiver::class.java), 0
+        )
+        assertFalse(receiver.exported)
     }
 
     @Test fun roomReservationSurvivesDatabaseRestart() {
