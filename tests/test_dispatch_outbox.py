@@ -202,6 +202,35 @@ class E6DispatchTests(unittest.TestCase):
         self.assertEqual(self.store.get(first)["state"], "SUBMISSION_UNKNOWN")
         self.assertEqual(self.store.count_by_state()["READY"], 1)
 
+    def test_conflict_409_is_read_only_reconciled_not_resent(self):
+        msg_id = self.add(1)
+        self.approve(1)
+        actual_post = self.gateway.post_message
+
+        def duplicate_response(message_id, recipient, body):
+            actual_post(message_id, recipient, body)
+            return GatewayResponse(409, {"message": "Already exists"})
+
+        self.gateway.post_message = duplicate_response
+        self.assertEqual(self.dispatcher.dispatch_one(explicitly_enabled=True), msg_id)
+        self.assertEqual(self.store.get(msg_id)["state"], "SUBMISSION_UNKNOWN")
+        self.assertEqual(len(self.gateway.submissions), 1)
+        self.gateway.sent(msg_id)
+        self.dispatcher.reconcile_one()
+        self.assertEqual(self.store.get(msg_id)["state"], "SENT")
+        self.assertEqual(self.gateway.submissions, [msg_id])
+
+    def test_device_attempt_unknown_stops_queue(self):
+        msg_id = self.add(1)
+        self.approve(1)
+        self.dispatcher.dispatch_one(explicitly_enabled=True)
+        self.gateway.get_attempts = lambda _: GatewayResponse(
+            200, {"attempts": [{"state": "UNKNOWN"}]}
+        )
+        self.dispatcher.reconcile_one()
+        self.assertEqual(self.store.get(msg_id)["state"], "ATTEMPT_UNKNOWN")
+        self.assertIsNone(self.dispatcher.dispatch_one(explicitly_enabled=True))
+
     def test_storage_is_owner_only_permissions(self):
         self.assertEqual(self.db_path.stat().st_mode & 0o777, 0o600)
 

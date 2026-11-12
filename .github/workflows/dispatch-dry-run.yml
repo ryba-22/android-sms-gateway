@@ -4,13 +4,13 @@ on:
   pull_request:
     paths:
       - "dispatch/**"
-      - "tests/test_dispatch_outbox.py"
+      - "tests/**"
       - ".github/workflows/dispatch-dry-run.yml"
   push:
     branches: ["feat/durable-dispatch-dry-run"]
     paths:
       - "dispatch/**"
-      - "tests/test_dispatch_outbox.py"
+      - "tests/**"
       - ".github/workflows/dispatch-dry-run.yml"
   workflow_dispatch:
 
