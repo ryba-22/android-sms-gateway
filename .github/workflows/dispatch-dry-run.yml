@@ -1,0 +1,39 @@
+name: E6 dispatch dry-run (no SMS)
+
+on:
+  pull_request:
+    paths:
+      - "dispatch/**"
+      - "tests/**"
+      - ".github/workflows/dispatch-dry-run.yml"
+  push:
+    branches: ["feat/durable-dispatch-dry-run"]
+    paths:
+      - "dispatch/**"
+      - "tests/**"
+      - ".github/workflows/dispatch-dry-run.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Syntax verification
+        run: python -m compileall -q dispatch tests
+      - name: Contract tests including 1100-message simulated campaign
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Synthetically validate opt-in data flow
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m dispatch.simulate --count 30
